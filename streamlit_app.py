@@ -1,171 +1,66 @@
-## pipenv --three
-## pipenv shell
-## pip install streamlit keras
-## python3 -m pip install tensorflow-macos
-
-import io
-
-import numpy as np
-import plost
+import pandas as pd
 import requests
 import streamlit as st
-from PIL import Image
 
-st.title("📷  Computer vision app")
+from models import SUPPORTED_MODELS, bytes_to_array, prepare_image
 
+st.set_page_config(layout="wide")
+st.title(":camera: Computer vision app")
+
+
+# Let user upload a picture
 with st.sidebar:
-    st.title("Upload an image")
-    upload_method = st.radio(
-        label="Choose how to upload an image",
-        options=("Webcam", "URL", "File upload"),
-        index=1,
+    st.title("Upload a picture")
+
+    upload_type = st.radio(
+        label="How to upload the picture",
+        options=(("From file", "From URL", "From webcam")),
     )
 
-    st.write(
-        f"""You have chosen to upload using {upload_method.lower()}!  
-        Let's do it :rocket:"""
-    )
+    image_bytes = None
 
-    camera_input = None
-    url = None
-    file = None
-
-    if upload_method == "Webcam":
-        camera_input = st.camera_input(label="Take a picture")
-
-    elif upload_method == "URL":
-        url = st.text_input(
-            label="URL of the image",
-            value="https://user-images.githubusercontent.com/63207451/141209252-a98cc392-8831-4fbe-af90-61cb7eee8264.png",
+    if upload_type == "From file":
+        file = st.file_uploader(
+            "Upload image file", type=[".png"], accept_multiple_files=False
         )
+        if file:
+            image_bytes = file.getvalue()
 
-    else:
-        file = st.file_uploader("Upload the image file", type=(".png", ".img"))
+    if upload_type == "From URL":
+        url = st.text_input("Paste URL")
+        if url:
+            image_bytes = requests.get(url).content
 
-st.write("## Uploaded image")
+    if upload_type == "From webcam":
+        camera = st.camera_input("Take a picture!")
+        if camera:
+            image_bytes = camera.getvalue()
 
-img_bytes = None
-
-if url:
-    img_bytes = requests.get(url).content
-
-if file:
-    img_bytes = file.getvalue()
-
-if camera_input:
-    img_bytes = camera_input.getvalue()
-
-if img_bytes:
-    st.write("Here's the image you uploaded:")
-    st.image(img_bytes, width=200)
-    img_bytes_io = io.BytesIO(img_bytes)
-    img_array = np.array(Image.open(img_bytes_io))
+st.write("## Uploaded picture")
+if image_bytes:
+    st.write("🎉 Here's what you uploaded!")
+    st.image(image_bytes, width=200)
 else:
-    st.warning("👈 Please upload an image!")
+    st.warning("👈 Please upload an image first...")
     st.stop()
 
-# st.write("## Pre-processing")
 
-# to_grayscale = st.checkbox("Set to grayscale")
-# if to_grayscale:
-#     st.write(img_array.shape)
-#     st.write(img_array[0][1])
-#     img_array[:, :, 1] = img_array[:, :, 0]
-#     img_array[:, :, 2] = img_array[:, :, 0]
-#     st.image(Image.fromarray(img_array))
+st.write("## Model prediction")
 
 
-st.write("## Prediction")
+# model_name = st.selectbox("Choose model", SUPPORTED_MODELS.keys())
+columns = st.columns(2)
+for column_index, model_name in enumerate(SUPPORTED_MODELS.keys()):
+    with columns[column_index]:
+        load_model, preprocess_input, decode_predictions = SUPPORTED_MODELS[
+            model_name
+        ].values()
 
-import pandas as pd
-import tensorflow as tf
-from tensorflow.keras.applications.mobilenet import (
-    decode_predictions as mobilenet_decode_predictions,
-)
-from tensorflow.keras.applications.mobilenet import (
-    preprocess_input as mobilenet_preprocess_input,
-)
-from tensorflow.keras.applications.vgg16 import (
-    decode_predictions as vgg16_decode_predictions,
-)
-from tensorflow.keras.applications.vgg16 import (
-    preprocess_input as vgg16_preprocess_input,
-)
-from tensorflow.keras.preprocessing import image
-
-
-@st.experimental_singleton
-def load_vgg16():
-    model = tf.keras.applications.VGG16(
-        include_top=True,
-        weights="imagenet",
-        input_tensor=None,
-        input_shape=None,
-        pooling=None,
-        classes=1000,
-    )
-
-    return model
-
-
-@st.experimental_singleton
-def load_mobilenet():
-    model = tf.keras.applications.MobileNet(
-        include_top=True,
-        weights="imagenet",
-        input_tensor=None,
-        input_shape=None,
-        pooling=None,
-        classes=1000,
-    )
-
-    return model
-
-
-model_name = st.selectbox("Choose model", options=("VGG-16", "MobileNet"))
-if model_name == "VGG-16":
-    load_model = load_vgg16
-    decode_predictions = vgg16_decode_predictions
-    preprocess_input = vgg16_preprocess_input
-if model_name == "MobileNet":
-    load_model = load_mobilenet
-    decode_predictions = mobilenet_decode_predictions
-    preprocess_input = mobilenet_preprocess_input
-
-model = load_model()
-IMAGENET_INPUT_SIZE = (224, 224)
-IMAGENET_INPUT_SHAPE = [224, 224, 3]
-
-
-@st.experimental_memo
-def pre_process_img(img_array):
-    img = Image.fromarray(img_array)
-    img = img.convert("RGB")
-    img = img.resize(IMAGENET_INPUT_SIZE, Image.NEAREST)
-    img = image.img_to_array(img)
-    img = np.expand_dims(img, axis=0)
-    img = preprocess_input(img)
-    img = img.reshape(*([1] + IMAGENET_INPUT_SHAPE))
-    return img
-
-
-st.write(f"Here are the predictions for **{model_name}**!")
-pre_processed_img = pre_process_img(img_array=img_array)
-prediction = model.predict(pre_processed_img)
-# n_rows = st.number_input("Display top-n rows", 5, 200)
-n_rows = 5
-decoded_prediction = pd.DataFrame(
-    decode_predictions(prediction, n_rows)[0],
-    columns=["label_id", "label", "probability"],
-).sort_values(by="probability", ascending=False)
-
-left, right = st.columns(2)
-with left:
-    st.dataframe(decoded_prediction)
-with right:
-    plost.bar_chart(
-        data=decoded_prediction,
-        bar="label",
-        value="probability",
-        direction="horizontal",
-    )
+        model = load_model()
+        image_array = bytes_to_array(image_bytes)
+        image_array = prepare_image(image_array, _model_preprocess=preprocess_input)
+        prediction = model.predict(image_array)
+        prediction_df = pd.DataFrame(decode_predictions(prediction, 5)[0])
+        prediction_df.columns = ["label_id", "label", "probability"]
+        st.write(f"Predictions for model {model_name}")
+        st.dataframe(prediction_df.sort_values(by="probability", ascending=False))
